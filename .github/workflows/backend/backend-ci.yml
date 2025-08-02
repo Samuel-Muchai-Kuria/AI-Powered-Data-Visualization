@@ -1,0 +1,85 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths: [ 'backend/**' ]
+  pull_request:
+    branches: [ main ]
+    paths: [ 'backend/**' ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: vizpoc
+          POSTGRES_USER: admin
+          POSTGRES_PASSWORD: password
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.11'
+    
+    - name: Install dependencies
+      run: |
+        cd backend
+        pip install -r requirements.txt
+    
+    - name: Set up database
+      env:
+        DB_HOST: localhost
+        DB_NAME: vizpoc
+        DB_USER: admin
+        DB_PASSWORD: password
+      run: |
+        cd database
+        PGPASSWORD=password psql -h localhost -U admin -d vizpoc -f init.sql
+        PGPASSWORD=password psql -h localhost -U admin -d vizpoc -f sample_data.sql
+    
+    - name: Run tests
+      env:
+        DB_HOST: localhost
+        DB_NAME: vizpoc
+        DB_USER: admin
+        DB_PASSWORD: password
+      run: |
+        cd backend
+        python -m pytest app/tests/ -v --cov=app --cov-report=xml
+    
+    - name: Upload coverage to Codecov
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./backend/coverage.xml
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Build Docker image
+      run: |
+        cd backend
+        docker build -t ai-viz-backend:${{ github.sha }} .
+    
+    - name: Deploy to staging
+      run: |
+        echo "Deploy to staging environment"
+        # Add your deployment commands here
